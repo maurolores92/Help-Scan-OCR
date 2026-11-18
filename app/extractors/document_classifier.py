@@ -147,10 +147,10 @@ def classify_and_extract_metadata(
         recipient_tax_id = client_cuit
         issuer_tax_id = next((c for c in tax_id_matches if c != client_cuit), None)
         if not issuer_tax_id and issuer_name and "HELP" in issuer_name.upper():
-            issuer_tax_id = "30-71171817-2"
+            issuer_tax_id = ""
     else:
         if issuer_name and "HELP" in issuer_name.upper():
-            issuer_tax_id = "30-71171817-2"
+            issuer_tax_id = ""
             recipient_tax_id = primary_tax_id
         else:
             issuer_tax_id = primary_tax_id
