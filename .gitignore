@@ -1,0 +1,27 @@
+# Entornos virtuales Python
+venv/
+.venv/
+env/
+ENV/
+
+# Bytecode y compilados
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Testing y caches
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Variables de entorno
+.env
+.env.*
+!.env.example
+
+# IDEs
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
