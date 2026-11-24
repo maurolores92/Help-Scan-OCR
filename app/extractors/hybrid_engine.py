@@ -25,11 +25,11 @@ def preprocess_image_for_ocr(img: Image.Image) -> Image.Image:
     """
     Mejora la calidad de la imagen escaneada para maximizar la tasa de acierto de Tesseract:
     1. Conversión a escala de grises.
-    2. Autocontraste dinámico: elimina velo grisáceo de fondo del papel y resalta caracteres oscuros.
+    2. Autocontraste suave: atenúa el fondo del papel sin borrar trazos finos de lapicera.
     """
     try:
         gray = img.convert("L")
-        enhanced = ImageOps.autocontrast(gray, cutoff=2)
+        enhanced = ImageOps.autocontrast(gray, cutoff=1)
         return enhanced
     except Exception:
         return img
@@ -39,8 +39,9 @@ def extract_text_and_pages(pdf_bytes: bytes) -> Tuple[str, int, str]:
     """
     Motor híbrido de doble capa:
     1. PyMuPDF (fitz) extrae el flujo de texto nativo digital (Tango ERP, AFIP, Word) en 10-30ms.
-    2. Si el PDF es un escaneo de imagen raster (ej. escaneo directo desde HP LaserJet sin capa de texto),
-       renderiza las páginas a 300 DPI, aplica preprocesamiento de contraste y ejecuta OCR con Tesseract en español.
+    2. Si alguna página no tiene capa de texto digital suficiente (escaneo, foto o manuscrito),
+       marca el motor como `python_tesseract_ocr` para que el backend pueda combinar OCR + Gemini Vision,
+       renderiza la página a 300 DPI y ejecuta Tesseract en español.
     """
     if not PYMUPDF_AVAILABLE:
         raise RuntimeError("PyMuPDF no está instalado para procesar archivos PDF.")
@@ -48,18 +49,20 @@ def extract_text_and_pages(pdf_bytes: bytes) -> Tuple[str, int, str]:
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     page_count = len(doc)
     combined_pages_text = []
-    used_engine = "python_pymupdf_native"
+    has_raster_page = False
 
     for page_idx in range(page_count):
         page = doc[page_idx]
         text = page.get_text("text") or ""
         clean_text = text.strip()
+        alnum_chars = sum(1 for ch in clean_text if ch.isalnum())
 
-        # Si la página tiene texto embebido significativo (más de 30 caracteres alfanuméricos)
-        if len(clean_text) >= 30:
+        # Si la página tiene texto nativo digital significativo (>= 50 caracteres alfanuméricos)
+        if alnum_chars >= 50:
             combined_pages_text.append(clean_text)
         else:
-            # Página vacía o es una imagen raster escaneada desde impresora
+            has_raster_page = True
+            # Página vacía o imagen raster escaneada / foto de remito o factura
             if TESSERACT_AVAILABLE:
                 try:
                     logger.info(f"Página {page_idx + 1}/{page_count} sin texto nativo. Renderizando a 300 DPI y ejecutando OCR Tesseract...")
@@ -86,7 +89,6 @@ def extract_text_and_pages(pdf_bytes: bytes) -> Tuple[str, int, str]:
                             ocr_text = fallback_text
 
                     combined_pages_text.append(ocr_text)
-                    used_engine = "python_tesseract_ocr"
                     logger.info(
                         f"Página {page_idx + 1} procesada por OCR con éxito: {len(ocr_text)} caracteres detectados"
                     )
@@ -97,5 +99,6 @@ def extract_text_and_pages(pdf_bytes: bytes) -> Tuple[str, int, str]:
                 combined_pages_text.append(clean_text)
 
     doc.close()
+    used_engine = "python_tesseract_ocr" if has_raster_page else "python_pymupdf_native"
     full_text = "\n\n".join(t for t in combined_pages_text if t)
     return full_text, page_count, used_engine
