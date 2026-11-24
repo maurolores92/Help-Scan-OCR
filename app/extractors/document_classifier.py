@@ -74,6 +74,42 @@ def parse_date(text: str) -> Optional[str]:
     return None
 
 
+CLIENT_SECTION_RE = re.compile(
+    r"(?:apellido\s+y\s+nombre(?:\s*\/\s*raz[oó]n\s+social)?|se[ñn]or(?:es)?|cliente|destinatario|comprador)\s*[:.]",
+    re.IGNORECASE,
+)
+CORPORATE_NAME_RE = re.compile(
+    r"\b(?:S\.?\s*A\.?\s*S?\.?|S\.?\s*R\.?\s*L\.?|S\.?\s*C\.?\s*A\.?|S\.?\s*H\.?|COOPERATIVA|FUNDACI[OÓ]N|ASOCIACI[OÓ]N|HELP\s*COPIES)\b",
+    re.IGNORECASE,
+)
+NON_COMPANY_HEADER_RE = re.compile(
+    r"^(?:factura|remito|presupuesto|nota\s+de|recibo|orden\s+de|original|duplicado|triplicado|afip|arca|comprobante|fecha|cuit|punto\s+de\s+venta|ingresos\s+brutos|iva\b)",
+    re.IGNORECASE,
+)
+
+
+def _split_header_and_client(text: str) -> tuple[str, str]:
+    match = CLIENT_SECTION_RE.search(text)
+    if match:
+        header = text[: match.start()].strip()
+        client = text[match.start() : match.start() + 450].strip()
+        return header, client
+    return text[:1200].strip(), ""
+
+
+def _clean_party_name(raw: Optional[str]) -> Optional[str]:
+    if not raw:
+        return None
+    cleaned = re.split(
+        r"\b(?:c\.?u\.?i\.?t\.?|d\.?n\.?i\.?|domicilio|direcci[oó]n|condici[oó]n|iva)\b",
+        raw,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0]
+    cleaned = re.sub(r"\d{5,}.*$", "", cleaned).strip(" :-–—\t")
+    return cleaned if len(cleaned) >= 2 else None
+
+
 def classify_and_extract_metadata(
     raw_text: str,
     original_file_name: str,
@@ -116,25 +152,44 @@ def classify_and_extract_metadata(
     primary_tax_id = tax_id_matches[0] if tax_id_matches else None
     secondary_tax_id = tax_id_matches[1] if len(tax_id_matches) > 1 else None
 
-    # Emisor
-    issuer_match = re.search(r"(?:proveedor|emisor|empresa)\s*:\s*([^\n]{3,90})", clean_text, re.IGNORECASE)
-    issuer_name = issuer_match.group(1).strip() if issuer_match else None
-    if not issuer_name and re.search(r"HELP\s*COPIES", clean_text, re.IGNORECASE):
-        issuer_name = "HELP COPIES S.R.L."
+    header_block, client_block_raw = _split_header_and_client(clean_text)
 
-    # Cliente / Receptor
-    recipient_match = (
-        re.search(r"(?:se[ñn]or(?:es)?|raz[oó]n\s+social|cliente|destinatario)[:\s]*([^\n\r0-9]{3,90})", clean_text, re.IGNORECASE)
-        or re.search(r"(?:se[ñn]or(?:es)?|raz[oó]n\s+social|cliente)[:\s]*([^\n\r]{3,90})", clean_text, re.IGNORECASE)
+    # Emisor (siempre en cabecera superior, antes del bloque de cliente)
+    issuer_match = (
+        re.search(r"(?:proveedor|emisor|empresa)\s*:\s*([^\n]{3,90})", clean_text, re.IGNORECASE)
+        or re.search(r"(?:raz[oó]n\s+social|denominaci[oó]n)\s*:\s*([^\n]{3,90})", header_block, re.IGNORECASE)
     )
-    recipient_name = None
-    if recipient_match:
-        recipient_name = re.sub(r"\d{5,}.*$", "", recipient_match.group(1)).strip()
+    issuer_name = _clean_party_name(issuer_match.group(1)) if issuer_match else None
+    if not issuer_name and re.search(r"HELP\s*COPIES", header_block or clean_text, re.IGNORECASE):
+        issuer_name = "HELP COPIES S.R.L."
+    if not issuer_name and header_block:
+        for h_line in [l.strip() for l in header_block.split("\n") if l.strip()][:12]:
+            if NON_COMPANY_HEADER_RE.match(h_line):
+                continue
+            if CORPORATE_NAME_RE.search(h_line):
+                candidate_issuer = _clean_party_name(h_line)
+                if candidate_issuer:
+                    issuer_name = candidate_issuer
+                    break
+
+    # Cliente / Receptor (nunca capturar la Razón Social del encabezado emisor)
+    recipient_match = re.search(
+        r"(?:apellido\s+y\s+nombre(?:\s*\/\s*raz[oó]n\s+social)?|se[ñn]or(?:es)?|cliente|destinatario|comprador)[:\s]*([^\n\r]{3,90})",
+        clean_text,
+        re.IGNORECASE,
+    ) or (
+        re.search(r"raz[oó]n\s+social[:\s]*([^\n\r]{3,90})", client_block_raw, re.IGNORECASE)
+        if client_block_raw
+        else None
+    )
+    recipient_name = _clean_party_name(recipient_match.group(1)) if recipient_match else None
+    if recipient_name and issuer_name and recipient_name.lower() == issuer_name.lower():
+        recipient_name = None
 
     # Detectar si hay un CUIT ubicado dentro del bloque de cliente / señores
     client_cuit = None
     client_block = re.search(
-        r"(?:se[ñn]or(?:es)?|raz[oó]n\s+social|cliente)[:\s]*([\s\S]{1,250}?)(?:\b(?:transferencia|c\.?a\.?e\.?|precio|total|subtotal|act:)\b|$)",
+        r"(?:apellido\s+y\s+nombre(?:\s*\/\s*raz[oó]n\s+social)?|se[ñn]or(?:es)?|cliente|destinatario|comprador)[:\s]*([\s\S]{1,280}?)(?:\b(?:transferencia|c\.?a\.?e\.?|precio|total|subtotal|act:)\b|$)",
         clean_text,
         re.IGNORECASE,
     )
@@ -143,9 +198,12 @@ def classify_and_extract_metadata(
         if c_found:
             client_cuit = c_found[0]
 
+    header_cuits = re.findall(r"\b\d{2}-\d{8}-\d\b", header_block)
     if client_cuit:
         recipient_tax_id = client_cuit
-        issuer_tax_id = next((c for c in tax_id_matches if c != client_cuit), None)
+        issuer_tax_id = next((c for c in header_cuits if c != client_cuit), None) or next(
+            (c for c in tax_id_matches if c != client_cuit), None
+        )
         if not issuer_tax_id and issuer_name and "HELP" in issuer_name.upper():
             issuer_tax_id = ""
     else:
@@ -153,8 +211,8 @@ def classify_and_extract_metadata(
             issuer_tax_id = ""
             recipient_tax_id = primary_tax_id
         else:
-            issuer_tax_id = primary_tax_id
-            recipient_tax_id = secondary_tax_id
+            issuer_tax_id = header_cuits[0] if header_cuits else primary_tax_id
+            recipient_tax_id = secondary_tax_id if issuer_tax_id == primary_tax_id else primary_tax_id
 
     # CAE de AFIP (14 dígitos)
     cae_match = re.search(r"C\.?A\.?E\.?[:\s]*(\d{14})", clean_text, re.IGNORECASE)
@@ -325,8 +383,8 @@ def classify_and_extract_metadata(
             "attributes": attributes,
             "items": [it.model_dump(by_alias=False) for it in extracted_items],
             "involvedParties": [
-                {"name": issuer_name or "Desconocido", "role": "emisor", "identifier": secondary_tax_id},
-                {"name": recipient_name or "Desconocido", "role": "receptor", "identifier": primary_tax_id},
+                {"name": issuer_name or "Desconocido", "role": "emisor", "identifier": issuer_tax_id},
+                {"name": recipient_name or "Desconocido", "role": "receptor", "identifier": recipient_tax_id},
             ],
             "dates": {"vencimiento": due_date} if due_date else {},
             "amounts": {"subtotal": net_amount or 0, "impuestos": tax_amount or 0},

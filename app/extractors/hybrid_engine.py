@@ -53,7 +53,10 @@ def extract_text_and_pages(pdf_bytes: bytes) -> Tuple[str, int, str]:
 
     for page_idx in range(page_count):
         page = doc[page_idx]
-        text = page.get_text("text") or ""
+        try:
+            text = page.get_text("text", sort=True) or ""
+        except TypeError:
+            text = page.get_text("text") or ""
         clean_text = text.strip()
         alnum_chars = sum(1 for ch in clean_text if ch.isalnum())
 
