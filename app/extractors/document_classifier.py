@@ -27,12 +27,18 @@ SPANISH_MONTHS = {
 }
 
 DOCUMENT_TYPE_RULES = [
+    ("nota_credito", re.compile(r"\b(nota\s+de\s+cr[eé]dito|credit\s+note|\bn\.?\s*c\.?\s*[abcme]\b|c[oó]d\.?\s*(?:0?03|0?08|0?13|0?53|203|208|213)\b)", re.IGNORECASE)),
+    ("nota_debito", re.compile(r"\b(nota\s+de\s+d[eé]bito|debit\s+note|\bn\.?\s*d\.?\s*[abcme]\b|c[oó]d\.?\s*(?:0?02|0?07|0?12|0?52|202|207|212)\b)", re.IGNORECASE)),
+    ("certificado_retencion", re.compile(r"\b(certificado\s+de\s+retenci[oó]n|constancia\s+de\s+retenci[oó]n|agente\s+de\s+retenci[oó]n|sicore|sire\b)", re.IGNORECASE)),
+    ("orden_pago", re.compile(r"\b(orden\s+de\s+pago)\b", re.IGNORECASE)),
+    ("transferencia_pago", re.compile(r"\b(comprobante\s+de\s+transferencia|transferencia\s+bancaria|id\s*coelsa|comprobante\s+de\s+dep[oó]sito|debin\b)", re.IGNORECASE)),
+    ("ticket_fiscal", re.compile(r"\b(tique\s+factura|ticket\s+factura|controlador\s+fiscal|tique\s+consumidor\s+final|c[oó]d\.?\s*(?:0?81|0?82|0?83|111)\b)", re.IGNORECASE)),
     ("factura", re.compile(r"\b(factura|invoice|comprobante\s+electr[oó]nico|cae\b)", re.IGNORECASE)),
     ("presupuesto", re.compile(r"\b(presupuesto|cotizaci[oó]n|quotation)", re.IGNORECASE)),
     ("nota_pedido", re.compile(r"\b(nota\s+de\s+pedido|solicitud\s+de\s+compra)", re.IGNORECASE)),
     ("orden_compra", re.compile(r"\b(orden\s+de\s+compra|purchase\s+order|\bo[\.\s]?c[\.\s]?\b)", re.IGNORECASE)),
     ("remito", re.compile(r"\b(remito|gu[ií]a\s+de\s+despacho|entrega\s+de\s+mercader[ií]a)", re.IGNORECASE)),
-    ("recibo", re.compile(r"\b(recibo|comprobante\s+de\s+pago|orden\s+de\s+pago)", re.IGNORECASE)),
+    ("recibo", re.compile(r"\b(recibo|comprobante\s+de\s+pago)", re.IGNORECASE)),
     ("orden_servicio", re.compile(r"\b(servicio\s+t[eé]cnico|orden\s+de\s+servicio|parte\s+t[eé]cnico|informe\s+t[eé]cnico)", re.IGNORECASE)),
     ("contrato", re.compile(r"\b(contrato|acuerdo|convenio|cl[aá]usula)", re.IGNORECASE)),
     ("legajo", re.compile(r"\b(legajo|curr[ií]culum|recibo\s+de\s+haberes|alta\s+temprana)", re.IGNORECASE)),
