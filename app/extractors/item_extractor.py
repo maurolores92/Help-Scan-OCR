@@ -41,9 +41,13 @@ def clean_amount(val_str: Optional[str]) -> Optional[float]:
     elif "," in cleaned:
         cleaned = cleaned.replace(",", ".")
     elif "." in cleaned:
-        parts = cleaned.split(".")
-        if len(parts) > 2:
-            cleaned = "".join(parts[:-1]) + "." + parts[-1]
+        # En formatos es-AR/LATAM, grupos exactos de miles sin coma decimal (ej: 154.200, 36.500, 1.250.000)
+        if re.fullmatch(r"\d{1,3}(?:\.\d{3})+", cleaned):
+            cleaned = cleaned.replace(".", "")
+        else:
+            parts = cleaned.split(".")
+            if len(parts) > 2:
+                cleaned = "".join(parts[:-1]) + "." + parts[-1]
 
     try:
         val = float(cleaned)

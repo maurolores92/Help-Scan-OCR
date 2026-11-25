@@ -88,6 +88,12 @@ NON_COMPANY_HEADER_RE = re.compile(
 )
 
 
+FISCAL_ISSUER_HINT_RE = re.compile(
+    r"\b(?:punto\s+de\s+venta|pto\.?\s*vta|ingresos\s+brutos|inicio\s+de\s+actividades|domicilio\s+comercial|original|duplicado|c\.?a\.?e\.?)\b",
+    re.IGNORECASE,
+)
+
+
 def _split_header_and_client(text: str) -> tuple[str, str]:
     match = CLIENT_SECTION_RE.search(text)
     if match:
@@ -153,18 +159,26 @@ def classify_and_extract_metadata(
     secondary_tax_id = tax_id_matches[1] if len(tax_id_matches) > 1 else None
 
     header_block, client_block_raw = _split_header_and_client(clean_text)
+    has_explicit_client_block = bool(client_block_raw)
+    has_fiscal_issuer_header = bool(FISCAL_ISSUER_HINT_RE.search(header_block))
 
-    # Emisor (siempre en cabecera superior, antes del bloque de cliente)
-    issuer_match = (
-        re.search(r"(?:proveedor|emisor|empresa)\s*:\s*([^\n]{3,90})", clean_text, re.IGNORECASE)
-        or re.search(r"(?:raz[oó]n\s+social|denominaci[oó]n)\s*:\s*([^\n]{3,90})", header_block, re.IGNORECASE)
-    )
+    # Emisor (siempre en cabecera superior, o explícito con Proveedor/Emisor/Empresa).
+    # En presupuestos/notas sin bloque cliente ni cabecera fiscal AFIP, "Razón social:" pertenece al destinatario.
+    issuer_match = re.search(r"(?:proveedor|emisor|empresa)\s*:\s*([^\n]{3,90})", clean_text, re.IGNORECASE)
+    if not issuer_match and (has_explicit_client_block or has_fiscal_issuer_header):
+        issuer_match = re.search(
+            r"(?:raz[oó]n\s+social|denominaci[oó]n)\s*:\s*([^\n]{3,90})",
+            header_block,
+            re.IGNORECASE,
+        )
     issuer_name = _clean_party_name(issuer_match.group(1)) if issuer_match else None
     if not issuer_name and re.search(r"HELP\s*COPIES", header_block or clean_text, re.IGNORECASE):
         issuer_name = "HELP COPIES S.R.L."
     if not issuer_name and header_block:
         for h_line in [l.strip() for l in header_block.split("\n") if l.strip()][:12]:
             if NON_COMPANY_HEADER_RE.match(h_line):
+                continue
+            if re.match(r"^(?:raz[oó]n\s+social|cliente|se[ñn]or(?:es)?)\s*:", h_line, re.IGNORECASE):
                 continue
             if CORPORATE_NAME_RE.search(h_line):
                 candidate_issuer = _clean_party_name(h_line)
@@ -177,11 +191,13 @@ def classify_and_extract_metadata(
         r"(?:apellido\s+y\s+nombre(?:\s*\/\s*raz[oó]n\s+social)?|se[ñn]or(?:es)?|cliente|destinatario|comprador)[:\s]*([^\n\r]{3,90})",
         clean_text,
         re.IGNORECASE,
-    ) or (
-        re.search(r"raz[oó]n\s+social[:\s]*([^\n\r]{3,90})", client_block_raw, re.IGNORECASE)
-        if client_block_raw
-        else None
     )
+    if not recipient_match:
+        if client_block_raw:
+            recipient_match = re.search(r"raz[oó]n\s+social[:\s]*([^\n\r]{3,90})", client_block_raw, re.IGNORECASE)
+        elif not has_fiscal_issuer_header:
+            recipient_match = re.search(r"raz[oó]n\s+social[:\s]*([^\n\r]{3,90})", clean_text, re.IGNORECASE)
+
     recipient_name = _clean_party_name(recipient_match.group(1)) if recipient_match else None
     if recipient_name and issuer_name and recipient_name.lower() == issuer_name.lower():
         recipient_name = None
