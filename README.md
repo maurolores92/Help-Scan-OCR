@@ -21,6 +21,8 @@ Microservicio de OCR y análisis semántico para el backend de HelpCopies ERP (`
 ```bash
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
+
+
 ```
 
 ## Ejecución con Docker
